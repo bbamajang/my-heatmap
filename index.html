@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>내 활동 히트맵</title>
+    <title>장성혁의 송파 활동 지도</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://leaflet.github.io/Leaflet.heat/dist/leaflet-heat.js"></script>
@@ -11,75 +11,96 @@
         body { margin: 0; padding: 0; font-family: sans-serif; }
         #map { height: 100vh; width: 100vw; }
         .controls {
-            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            z-index: 1000; background: white; padding: 10px; border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2); display: flex; gap: 10px;
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; background: rgba(255,255,255,0.9); padding: 15px; border-radius: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; gap: 10px; backdrop-filter: blur(5px);
         }
-        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        #startBtn { background: #4CAF50; color: white; }
-        #stopBtn { background: #f44336; color: white; }
-        #clearBtn { background: #555; color: white; }
+        button { padding: 12px 20px; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        #startBtn { background: #ff6600; color: white; } /* 개혁 오렌지 */
+        #stopBtn { background: #333; color: white; }
+        #clearBtn { background: #eee; color: #666; }
+        .status { position: absolute; top: 20px; right: 20px; z-index: 1000; background: white; padding: 8px 15px; border-radius: 10px; font-size: 12px; font-weight: bold; border: 1px solid #ff6600; }
     </style>
 </head>
 <body>
 
 <div id="map"></div>
+<div class="status" id="recordStatus">기록 중지됨</div>
 <div class="controls">
     <button id="startBtn">기록 시작</button>
-    <button id="stopBtn" style="display:none;">중지</button>
-    <button id="clearBtn">초기화</button>
+    <button id="stopBtn" style="display:none;">기록 중지</button>
+    <button id="clearBtn">데이터 초기화</button>
 </div>
 
 <script>
-    let map = L.map('map').setView([37.5665, 126.9780], 13); // 기본 서울 위치
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    // 1. 지도 초기화 (송파구 중심)
+    let map = L.map('map').setView([37.5145, 127.1060], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
 
-    let heatLayer = L.heatLayer([], {radius: 25, blur: 15, maxZoom: 17}).addTo(map);
+    // 2. 히트맵 레이어 설정 (정밀도와 강도 조절)
+    let heatLayer = L.heatLayer([], {
+        radius: 12,       // 입자 크기를 줄여 골목길 표현 (기존 25에서 12로 축소)
+        blur: 8,          // 번짐을 줄여 선명도 증가
+        maxZoom: 17,      // 줌 인 했을 때의 농도 최적화
+        max: 5.0,         // ⭐ 중요: 이 값이 높을수록 여러 번 방문해야 진해짐 (1.0이면 한 번만 가도 빨개짐)
+        gradient: {       // 방문 횟수에 따른 색상 변화
+            0.1: 'blue', 
+            0.2: 'lime', 
+            0.4: 'orange', 
+            0.6: 'red'
+        }
+    }).addTo(map);
+
     let watchId = null;
     let pathData = JSON.parse(localStorage.getItem('myGpsData')) || [];
 
-    // 저장된 데이터가 있다면 지도에 표시
+    // 저장된 데이터 불러오기
     if (pathData.length > 0) {
         heatLayer.setLatLngs(pathData);
-        map.panTo(pathData[pathData.length - 1]);
     }
 
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const clearBtn = document.getElementById('clearBtn');
+    const statusDiv = document.getElementById('recordStatus');
 
     function updateHeatmap(lat, lng) {
-        pathData.push([lat, lng]);
+        // [위도, 경도, 강도] 형태 - 강도를 0.5 정도로 주면 10번 지나가야 완전한 빨간색(5.0)이 됨
+        pathData.push([lat, lng, 0.5]); 
         localStorage.setItem('myGpsData', JSON.stringify(pathData));
         heatLayer.setLatLngs(pathData);
     }
 
     startBtn.onclick = () => {
-        if (!navigator.geolocation) return alert("GPS를 지원하지 않는 브라우저입니다.");
+        if (!navigator.geolocation) return alert("GPS를 지원하지 않습니다.");
         
         watchId = navigator.geolocation.watchPosition(
             (pos) => {
                 const { latitude, longitude } = pos.coords;
                 updateHeatmap(latitude, longitude);
-                map.setView([latitude, longitude]);
+                map.panTo([latitude, longitude]);
+                statusDiv.innerText = "위치 수집 중...";
+                statusDiv.style.color = "#ff6600";
             },
-            (err) => console.error(err),
-            { enableHighAccuracy: true, distanceFilter: 10 }
+            (err) => alert("GPS 연결 오류: " + err.message),
+            { enableHighAccuracy: true, distanceFilter: 5 } // 5미터 이동할 때마다 기록
         );
         startBtn.style.display = 'none';
         stopBtn.style.display = 'block';
-        alert("위치 기록을 시작합니다.");
     };
 
     stopBtn.onclick = () => {
         navigator.geolocation.clearWatch(watchId);
         startBtn.style.display = 'block';
         stopBtn.style.display = 'none';
-        alert("기록이 중지되었습니다.");
+        statusDiv.innerText = "기록 중지됨";
+        statusDiv.style.color = "#000";
     };
 
     clearBtn.onclick = () => {
-        if(confirm("모든 데이터를 삭제할까요?")) {
+        if(confirm("모든 활동 기록을 삭제하고 새로 시작할까요?")) {
             pathData = [];
             localStorage.removeItem('myGpsData');
             heatLayer.setLatLngs([]);
